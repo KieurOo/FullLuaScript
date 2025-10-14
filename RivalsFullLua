@@ -1,0 +1,719 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local Mouse = LocalPlayer:GetMouse()
+local GuiInset = GuiService:GetGuiInset()
+
+local fov_settings = {
+    enabled = false,
+    size = 200,
+    color = Color3.new(1, 1, 1),
+    outline = true,
+    outline_color = Color3.new(0, 0, 0),
+    filled = false
+}
+
+local lineColor = Color3.new(0, 0, 1)  -- Changed to blue for uniqueness
+local lineThickness = 2  -- Increased thickness for uniqueness
+local lineTransparency = 0.7  -- Added slight transparency for a unique look
+
+local SNAP_INSTANT = true
+
+local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+
+local scriptEnabled = false
+local aimMode = "Head"
+local rainbow_enabled = false
+local max_distance = 1000
+local min_fov = 50
+local max_fov = math.min(Camera.ViewportSize.X, Camera.ViewportSize.Y) / 2
+
+local hasDrawing = (typeof(Drawing) == "table" or typeof(Drawing) == "userdata")
+if not hasDrawing then
+    warn("Drawing API not available in this environment. Visuals will not render.")
+end
+
+local snapLines = {}
+local function createSnapLine()
+    local line = Drawing.new("Line")
+    line.Transparency = lineTransparency
+    line.Thickness = lineThickness
+    line.ZIndex = 1
+    line.Color = lineColor
+    line.Visible = false
+    return line
+end
+
+local fov_circle, fov_outline
+if hasDrawing then
+    fov_circle = Drawing.new("Circle")
+    fov_circle.Transparency = 1
+    fov_circle.Thickness = 1
+    fov_circle.ZIndex = 2
+    fov_circle.Color = fov_settings.color
+    fov_circle.Radius = fov_settings.size
+    fov_circle.Filled = fov_settings.filled
+    fov_circle.Visible = fov_settings.enabled
+
+    fov_outline = Drawing.new("Circle")
+    fov_outline.Transparency = 1
+    fov_outline.Thickness = 3
+    fov_outline.ZIndex = 1
+    fov_outline.Color = fov_settings.outline_color
+    fov_outline.Radius = fov_settings.size
+    fov_outline.Filled = fov_settings.filled
+    fov_outline.Visible = fov_settings.enabled and fov_settings.outline
+end
+
+local function getTorso(char)
+    return char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso") or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getAbsoluteMousePosition()
+    local insetY = GuiInset.Y
+    local vs = Camera.ViewportSize
+    if isMobile then
+        return Vector2.new(vs.X / 2, insetY + vs.Y / 2)
+    else
+        return UserInputService:GetMouseLocation()
+    end
+end
+
+local function viewportToAbsolute(screenPt)
+    return Vector2.new(screenPt.X, screenPt.Y + GuiInset.Y)
+end
+
+local function getViewportMousePosition()
+    local absPos = getAbsoluteMousePosition()
+    return Vector2.new(absPos.X, absPos.Y - GuiInset.Y)
+end
+
+local function getTargetInfo(viewportMousePos)
+    local bestPlayer, bestDist = nil, math.huge
+
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= LocalPlayer and pl.Character and pl.Character.Parent then
+            local char = pl.Character
+            local humanoid = char:FindFirstChild("Humanoid")
+            if humanoid and humanoid.Health <= 0 then continue end
+
+            local root = char:FindFirstChild("HumanoidRootPart")
+            if root then
+                local myChar = LocalPlayer.Character
+                if myChar then
+                    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+                    if myRoot then
+                        local dist = (root.Position - myRoot.Position).Magnitude
+                        if dist > max_distance then continue end -- Ignore far players
+                    end
+                end
+            end
+
+            local head = char:FindFirstChild("Head")
+            local torso = getTorso(char)
+            local playerDist = math.huge
+
+            local function isInFOV(part)
+                if part and part:IsA("BasePart") then
+                    local screenPt, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local viewportScr = Vector2.new(screenPt.X, screenPt.Y)
+                        local dist = (viewportScr - viewportMousePos).Magnitude
+                        if dist <= fov_settings.size then
+                            return true, dist
+                        end
+                    end
+                end
+                return false, math.huge
+            end
+
+            local headIn, headDist = isInFOV(head)
+            local torsoIn, torsoDist = isInFOV(torso)
+
+            if headIn or torsoIn then
+                playerDist = math.min(headDist, torsoDist)
+                if playerDist < bestDist then
+                    bestDist = playerDist
+                    bestPlayer = pl
+                end
+            end
+        end
+    end
+
+    if not bestPlayer then return nil, nil end
+
+    local char = bestPlayer.Character
+    local head = char:FindFirstChild("Head")
+    local torso = getTorso(char)
+    local targetParts = {}
+
+    local function addPart(part)
+        if part and part:IsA("BasePart") then
+            local screenPt, onScreen = Camera:WorldToViewportPoint(part.Position)
+            if onScreen then
+                local viewportScr = Vector2.new(screenPt.X, screenPt.Y)
+                table.insert(targetParts, {part = part, screenPos = viewportScr})
+            end
+        end
+    end
+
+    if aimMode == "Head" then
+        addPart(head)
+    elseif aimMode == "Torso" then
+        addPart(torso)
+    else
+        addPart(head)
+        addPart(torso)
+    end
+
+    return bestPlayer, targetParts
+end
+
+local function snapCameraTo(worldPosition)
+    if not Camera then return end
+    local camPos = Camera.CFrame.Position
+    local targetCFrame = CFrame.new(camPos, worldPosition)
+
+    if SNAP_INSTANT then
+        local prevType = Camera.CameraType
+        Camera.CameraType = Enum.CameraType.Scriptable
+        Camera.CFrame = targetCFrame
+        RunService.RenderStepped:Wait()
+        Camera.CameraType = prevType
+    else
+        Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, 0.95)
+    end
+end
+
+RunService.RenderStepped:Connect(function()
+    if not scriptEnabled or not hasDrawing then
+        for _, line in ipairs(snapLines) do
+            line.Visible = false
+        end
+        if fov_circle then fov_circle.Visible = false end
+        if fov_outline then fov_outline.Visible = false end
+        return
+    end
+
+    local absMousePos = getAbsoluteMousePosition()
+    local viewportMousePos = getViewportMousePosition()
+
+    local targetPlayer, targetParts = getTargetInfo(viewportMousePos)
+
+    if fov_circle then
+        fov_circle.Position = absMousePos
+        fov_circle.Radius = fov_settings.size
+        fov_circle.Visible = fov_settings.enabled
+    end
+    if fov_outline then
+        fov_outline.Position = absMousePos
+        fov_outline.Radius = fov_settings.size
+        fov_outline.Visible = fov_settings.enabled and fov_settings.outline
+    end
+
+    for i = #snapLines, 1, -1 do
+        snapLines[i].Visible = false
+    end
+    if targetParts then
+        for i, targetInfo in ipairs(targetParts) do
+            if not snapLines[i] then
+                snapLines[i] = createSnapLine()
+            end
+            local line = snapLines[i]
+            line.Visible = true
+            line.From = absMousePos
+            line.To = viewportToAbsolute(targetInfo.screenPos)
+            if rainbow_enabled then
+                line.Color = Color3.fromHSV((tick() * 0.3) % 1, 1, 1)
+            else
+                line.Color = lineColor
+            end
+            line.Transparency = lineTransparency  -- Apply transparency
+        end
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed or not scriptEnabled then return end
+    local viewportMousePos
+    if not isMobile and input.UserInputType == Enum.UserInputType.MouseButton1 then
+        viewportMousePos = getViewportMousePosition()
+    elseif isMobile and input.UserInputType == Enum.UserInputType.Touch then
+        viewportMousePos = Vector2.new(input.Position.X, input.Position.Y - GuiInset.Y)
+    else
+        return
+    end
+    local pl, targetParts = getTargetInfo(viewportMousePos)
+    if pl and #targetParts > 0 then
+        -- Choose random if multiple (for Both)
+        local chosen = targetParts[math.random(1, #targetParts)]
+        local targetPos = chosen.part.Position + Vector3.new(0, 0.02, 0)
+        snapCameraTo(targetPos)
+    end
+end)
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AimbotGUI"
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+screenGui.ResetOnSpawn = false
+
+-- New UI element at top left
+local deviceFrame = Instance.new("Frame")
+deviceFrame.Size = UDim2.new(0, 200, 0, 30)
+deviceFrame.Position = UDim2.new(0, 0, 0, 0)
+deviceFrame.BackgroundColor3 = Color3.new(0, 0, 0)
+deviceFrame.BackgroundTransparency = 0.5
+deviceFrame.BorderSizePixel = 0
+deviceFrame.Parent = screenGui
+
+local deviceCorner = Instance.new("UICorner")
+deviceCorner.CornerRadius = UDim.new(0, 5)
+deviceCorner.Parent = deviceFrame
+
+local deviceStroke = Instance.new("UIStroke")
+deviceStroke.Color = Color3.new(1, 1, 1)
+deviceStroke.Thickness = 1
+deviceStroke.Transparency = 0.5
+deviceStroke.Parent = deviceFrame
+
+local deviceLabel = Instance.new("TextLabel")
+deviceLabel.Size = UDim2.new(1, 0, 1, 0)
+deviceLabel.BackgroundTransparency = 1
+deviceLabel.TextColor3 = Color3.new(1, 1, 1)
+deviceLabel.Font = Enum.Font.SourceSansBold
+deviceLabel.TextSize = 18
+deviceLabel.TextXAlignment = Enum.TextXAlignment.Left
+deviceLabel.Parent = deviceFrame
+
+local fps = 0
+if not isMobile then
+    local frameCount = 0
+    local lastTime = os.clock()
+    RunService.RenderStepped:Connect(function()
+        frameCount = frameCount + 1
+        local now = os.clock()
+        if now - lastTime >= 1 then
+            fps = frameCount / (now - lastTime)
+            deviceLabel.Text = "Pc I " .. LocalPlayer.Name .. " (" .. math.floor(fps) .. ")"
+            frameCount = 0
+            lastTime = now
+        end
+    end)
+else
+    deviceLabel.Text = "Mobile"
+end
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 200, 0, 250)  -- Increased height for new buttons
+mainFrame.Position = UDim2.new(0.5, -100, 0.5, -125)  -- Adjusted position
+mainFrame.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 8)
+uiCorner.Parent = mainFrame
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 30)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Kxk.Snap"
+titleLabel.TextColor3 = Color3.new(1, 1, 1)
+titleLabel.Font = Enum.Font.SourceSansBold
+titleLabel.TextSize = 18
+titleLabel.Parent = mainFrame
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0.45, 0, 0, 40)
+toggleButton.Position = UDim2.new(0.05, 0, 0.15, 0)
+toggleButton.BackgroundColor3 = Color3.new(0.8, 0.2, 0.2)
+toggleButton.Text = "Off"
+toggleButton.TextColor3 = Color3.new(1, 1, 1)
+toggleButton.Font = Enum.Font.SourceSans
+toggleButton.TextSize = 16
+toggleButton.Parent = mainFrame
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 5)
+toggleCorner.Parent = toggleButton
+
+local modeButton = Instance.new("TextButton")
+modeButton.Size = UDim2.new(0.45, 0, 0, 40)
+modeButton.Position = UDim2.new(0.5, 0, 0.15, 0)
+modeButton.BackgroundColor3 = Color3.new(0.2, 0.2, 0.8)
+modeButton.Text = "Head"
+modeButton.TextColor3 = Color3.new(1, 1, 1)
+modeButton.Font = Enum.Font.SourceSans
+modeButton.TextSize = 16
+modeButton.Parent = mainFrame
+
+local modeCorner = Instance.new("UICorner")
+modeCorner.CornerRadius = UDim.new(0, 5)
+modeCorner.Parent = modeButton
+
+local adjustButton = Instance.new("TextButton")
+adjustButton.Size = UDim2.new(0.9, 0, 0, 40)
+adjustButton.Position = UDim2.new(0.05, 0, 0.35, 0)
+adjustButton.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+adjustButton.Text = "Adjust"
+adjustButton.TextColor3 = Color3.new(1, 1, 1)
+adjustButton.Font = Enum.Font.SourceSans
+adjustButton.TextSize = 16
+adjustButton.Parent = mainFrame
+
+local adjustCorner = Instance.new("UICorner")
+adjustCorner.CornerRadius = UDim.new(0, 5)
+adjustCorner.Parent = adjustButton
+
+local tipsButton = Instance.new("TextButton")
+tipsButton.Size = UDim2.new(0.9, 0, 0, 40)
+tipsButton.Position = UDim2.new(0.05, 0, 0.55, 0)
+tipsButton.BackgroundColor3 = Color3.new(0.3, 0.6, 0.3)
+tipsButton.Text = "Tips"
+tipsButton.TextColor3 = Color3.new(1, 1, 1)
+tipsButton.Font = Enum.Font.SourceSans
+tipsButton.TextSize = 16
+tipsButton.Parent = mainFrame
+
+local tipsCorner = Instance.new("UICorner")
+tipsCorner.CornerRadius = UDim.new(0, 5)
+tipsCorner.Parent = tipsButton
+
+local hideButton = Instance.new("TextButton")
+hideButton.Size = UDim2.new(0.9, 0, 0, 40)
+hideButton.Position = UDim2.new(0.05, 0, 0.75, 0)
+hideButton.BackgroundColor3 = Color3.new(0.6, 0.3, 0.3)
+hideButton.Text = "Hide"
+hideButton.TextColor3 = Color3.new(1, 1, 1)
+hideButton.Font = Enum.Font.SourceSans
+hideButton.TextSize = 16
+hideButton.Parent = mainFrame
+
+local hideCorner = Instance.new("UICorner")
+hideCorner.CornerRadius = UDim.new(0, 5)
+hideCorner.Parent = hideButton
+
+local plusFrame = Instance.new("Frame")
+plusFrame.Size = UDim2.new(0, 40, 0, 40)
+plusFrame.Position = UDim2.new(0, 10, 0, 40)  -- Below deviceFrame
+plusFrame.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+plusFrame.BorderSizePixel = 0
+plusFrame.Parent = screenGui
+plusFrame.Visible = false
+
+local plusCorner = Instance.new("UICorner")
+plusCorner.CornerRadius = UDim.new(0, 5)
+plusCorner.Parent = plusFrame
+
+local plusButton = Instance.new("TextButton")
+plusButton.Size = UDim2.new(1, 0, 1, 0)
+plusButton.BackgroundTransparency = 1
+plusButton.Text = "+"
+plusButton.TextColor3 = Color3.new(1, 1, 1)
+plusButton.Font = Enum.Font.SourceSansBold
+plusButton.TextSize = 24
+plusButton.Parent = plusFrame
+
+local adjustFrame = Instance.new("Frame")
+adjustFrame.Size = UDim2.new(0, 200, 0, 200)
+adjustFrame.Position = UDim2.new(0.5, -100, 0.5, -100)
+adjustFrame.BackgroundColor3 = Color3.new(0.1, 0.1, 0.1)
+adjustFrame.BorderSizePixel = 0
+adjustFrame.Parent = screenGui
+adjustFrame.Visible = false
+
+local adjustUiCorner = Instance.new("UICorner")
+adjustUiCorner.CornerRadius = UDim.new(0, 8)
+adjustUiCorner.Parent = adjustFrame
+
+local adjustTitleLabel = Instance.new("TextLabel")
+adjustTitleLabel.Size = UDim2.new(1, 0, 0, 30)
+adjustTitleLabel.BackgroundTransparency = 1
+adjustTitleLabel.Text = "Adjust Settings"
+adjustTitleLabel.TextColor3 = Color3.new(1, 1, 1)
+adjustTitleLabel.Font = Enum.Font.SourceSansBold
+adjustTitleLabel.TextSize = 18
+adjustTitleLabel.Parent = adjustFrame
+
+local sliderFrame = Instance.new("Frame")
+sliderFrame.Size = UDim2.new(0.9, 0, 0, 20)
+sliderFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
+sliderFrame.BackgroundColor3 = Color3.new(0.3, 0.3, 0.3)
+sliderFrame.Parent = adjustFrame
+
+local sliderCorner = Instance.new("UICorner")
+sliderCorner.CornerRadius = UDim.new(0, 5)
+sliderCorner.Parent = sliderFrame
+
+local sliderButton = Instance.new("TextButton")
+sliderButton.Size = UDim2.new(0, 10, 1, 10)
+sliderButton.Position = UDim2.new(0, 0, 0, -5)
+sliderButton.BackgroundColor3 = Color3.new(1, 1, 1)
+sliderButton.Text = ""
+sliderButton.Parent = sliderFrame
+
+local sliderBtnCorner = Instance.new("UICorner")
+sliderBtnCorner.CornerRadius = UDim.new(0, 5)
+sliderBtnCorner.Parent = sliderButton
+
+local fovLabel = Instance.new("TextLabel")
+fovLabel.Size = UDim2.new(1, 0, 0, 20)
+fovLabel.Position = UDim2.new(0, 0, -1, 0)
+fovLabel.BackgroundTransparency = 1
+fovLabel.Text = "FOV: " .. math.floor(fov_settings.size)
+fovLabel.TextColor3 = Color3.new(1, 1, 1)
+fovLabel.Font = Enum.Font.SourceSans
+fovLabel.TextSize = 16
+fovLabel.Parent = sliderFrame
+
+local initialPos = (fov_settings.size - min_fov) / (max_fov - min_fov)
+sliderButton.Position = UDim2.new(initialPos, -5, 0, -5)
+
+local rainbowButton = Instance.new("TextButton")
+rainbowButton.Size = UDim2.new(0.9, 0, 0, 40)
+rainbowButton.Position = UDim2.new(0.05, 0, 0.5, 0)
+rainbowButton.BackgroundColor3 = Color3.new(0.5, 0.5, 0.5)
+rainbowButton.Text = "Rainbow: Off"
+rainbowButton.TextColor3 = Color3.new(1, 1, 1)
+rainbowButton.Font = Enum.Font.SourceSans
+rainbowButton.TextSize = 16
+rainbowButton.Parent = adjustFrame
+
+local rainbowCorner = Instance.new("UICorner")
+rainbowCorner.CornerRadius = UDim.new(0, 5)
+rainbowCorner.Parent = rainbowButton
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0.9, 0, 0, 40)
+closeButton.Position = UDim2.new(0.05, 0, 0.75, 0)
+closeButton.BackgroundColor3 = Color3.new(0.8, 0.2, 0.2)
+closeButton.Text = "Close"
+closeButton.TextColor3 = Color3.new(1, 1, 1)
+closeButton.Font = Enum.Font.SourceSans
+closeButton.TextSize = 16
+closeButton.Parent = adjustFrame
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 5)
+closeCorner.Parent = closeButton
+
+local shownNotification = false
+
+local function showNotification(forceShow)
+    if not forceShow and shownNotification then return end
+    local notificationFrame = Instance.new("Frame")
+    notificationFrame.Size = UDim2.new(0, 300, 0, 150)
+    notificationFrame.Position = UDim2.new(0.5, -150, -0.3, 0)
+    notificationFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+    notificationFrame.BackgroundColor3 = Color3.new(0.05, 0.05, 0.05)
+    notificationFrame.BackgroundTransparency = 1
+    notificationFrame.BorderSizePixel = 0
+    notificationFrame.Parent = screenGui
+
+    local notifCorner = Instance.new("UICorner")
+    notifCorner.CornerRadius = UDim.new(0, 10)
+    notifCorner.Parent = notificationFrame
+
+    local notifStroke = Instance.new("UIStroke")
+    notifStroke.Color = Color3.new(0.2, 0.8, 1)
+    notifStroke.Thickness = 2
+    notifStroke.Transparency = 1
+    notifStroke.Parent = notificationFrame
+
+    local notifLabel = Instance.new("TextLabel")
+    notifLabel.Size = UDim2.new(1, -20, 1, -20)
+    notifLabel.Position = UDim2.new(0, 10, 0, 10)
+    notifLabel.BackgroundTransparency = 1
+    notifLabel.Text = "Welcome to Kxk.Snap Aimbot!\n\nThis is a click-by-click aimbot. To use:\n- Aim your crosshair near a target within the FOV circle.\n- Click left mouse button (or tap on mobile) to snap the camera to the target's head or torso.\n- The snap lines pinpoint the exact parts detected in FOV.\n- It's not a hold-to-aim; each click snaps once.\n\nPress RightControl to toggle FOV circle visibility."
+    notifLabel.TextColor3 = Color3.new(1, 1, 1)
+    notifLabel.Font = Enum.Font.Gotham
+    notifLabel.TextSize = 14
+    notifLabel.TextWrapped = true
+    notifLabel.TextTransparency = 1
+    notifLabel.Parent = notificationFrame
+
+    local tweenInfoIn = TweenInfo.new(0.8, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out)
+    local tweenInFrame = TweenService:Create(notificationFrame, tweenInfoIn, {Position = UDim2.new(0.5, -150, 0.2, 0), BackgroundTransparency = 0.3})
+    local tweenInStroke = TweenService:Create(notifStroke, tweenInfoIn, {Transparency = 0})
+    local tweenInLabel = TweenService:Create(notifLabel, tweenInfoIn, {TextTransparency = 0})
+
+    tweenInFrame:Play()
+    tweenInStroke:Play()
+    tweenInLabel:Play()
+
+    tweenInFrame.Completed:Wait()
+
+    wait(8)
+
+    local tweenInfoOut = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    local tweenOutFrame = TweenService:Create(notificationFrame, tweenInfoOut, {Position = UDim2.new(0.5, -150, -0.3, 0), BackgroundTransparency = 1})
+    local tweenOutStroke = TweenService:Create(notifStroke, tweenInfoOut, {Transparency = 1})
+    local tweenOutLabel = TweenService:Create(notifLabel, tweenInfoOut, {TextTransparency = 1})
+
+    tweenOutFrame:Play()
+    tweenOutStroke:Play()
+    tweenOutLabel:Play()
+
+    tweenOutFrame.Completed:Connect(function()
+        notificationFrame:Destroy()
+    end)
+
+    if not forceShow then
+        shownNotification = true
+    end
+end
+
+local function animateButton(button)
+    local originalSize = button.Size
+    local tweenInfo = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local grow = TweenService:Create(button, tweenInfo, {Size = originalSize + UDim2.new(0, 5, 0, 5)})
+    local shrink = TweenService:Create(button, tweenInfo, {Size = originalSize})
+    grow:Play()
+    grow.Completed:Wait()
+    shrink:Play()
+end
+
+toggleButton.MouseButton1Click:Connect(function()
+    animateButton(toggleButton)
+    scriptEnabled = not scriptEnabled
+    toggleButton.Text = scriptEnabled and "On" or "Off"
+    toggleButton.BackgroundColor3 = scriptEnabled and Color3.new(0.2, 0.8, 0.2) or Color3.new(0.8, 0.2, 0.2)
+    fov_settings.enabled = scriptEnabled
+    if scriptEnabled and not shownNotification then
+        showNotification()
+    end
+end)
+
+local modes = {"Head", "Torso", "Both"}
+local currentModeIndex = 1
+modeButton.MouseButton1Click:Connect(function()
+    animateButton(modeButton)
+    currentModeIndex = (currentModeIndex % #modes) + 1
+    aimMode = modes[currentModeIndex]
+    modeButton.Text = aimMode
+end)
+
+adjustButton.MouseButton1Click:Connect(function()
+    animateButton(adjustButton)
+    mainFrame.Visible = false
+    adjustFrame.Visible = true
+end)
+
+tipsButton.MouseButton1Click:Connect(function()
+    animateButton(tipsButton)
+    showNotification(true)  -- Force show for tips
+end)
+
+hideButton.MouseButton1Click:Connect(function()
+    animateButton(hideButton)
+    mainFrame.Visible = false
+    if adjustFrame.Visible then
+        adjustFrame.Visible = false
+    end
+    plusFrame.Visible = true
+end)
+
+plusButton.MouseButton1Click:Connect(function()
+    mainFrame.Visible = true
+    plusFrame.Visible = false
+end)
+
+rainbowButton.MouseButton1Click:Connect(function()
+    animateButton(rainbowButton)
+    rainbow_enabled = not rainbow_enabled
+    rainbowButton.Text = "Rainbow: " .. (rainbow_enabled and "On" or "Off")
+end)
+
+closeButton.MouseButton1Click:Connect(function()
+    animateButton(closeButton)
+    adjustFrame.Visible = false
+    mainFrame.Visible = true
+end)
+
+local sliderDragging = false
+sliderButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        sliderDragging = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        sliderDragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if sliderDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local sliderPos = math.clamp((input.Position.X - sliderFrame.AbsolutePosition.X) / sliderFrame.AbsoluteSize.X, 0, 1)
+        sliderButton.Position = UDim2.new(sliderPos, -5, 0, -5)
+        local newSize = min_fov + (max_fov - min_fov) * sliderPos
+        fov_settings.size = newSize
+        fovLabel.Text = "FOV: " .. math.floor(newSize)
+    end
+end)
+
+local dragging, dragInput, dragStart, startPos
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+mainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local adjustDragging, adjustDragInput, adjustDragStart, adjustStartPos
+adjustFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        adjustDragging = true
+        adjustDragStart = input.Position
+        adjustStartPos = adjustFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                adjustDragging = false
+            end
+        end)
+    end
+end)
+adjustFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        adjustDragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == adjustDragInput and adjustDragging then
+        local delta = input.Position - adjustDragStart
+        adjustFrame.Position = UDim2.new(adjustStartPos.X.Scale, adjustStartPos.X.Offset + delta.X, adjustStartPos.Y.Scale, adjustStartPos.Y.Offset + delta.Y)
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.RightControl then
+        fov_settings.enabled = not fov_settings.enabled
+    end
+end)
+
+print("monkey.")
