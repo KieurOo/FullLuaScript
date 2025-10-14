@@ -1,0 +1,409 @@
+local ScreenGui = Instance.new("ScreenGui")
+local MainFrame = Instance.new("Frame")
+local UICorner = Instance.new("UICorner")
+local TitleLabel = Instance.new("TextLabel")
+local CloseButton = Instance.new("TextButton")
+local MinimizeButton = Instance.new("TextButton")
+local TabContainer = Instance.new("Frame")
+local FarmTabButton = Instance.new("TextButton")
+local UICorner_FarmTab = Instance.new("UICorner")
+local MiscTabButton = Instance.new("TextButton")
+local UICorner_MiscTab = Instance.new("UICorner")
+local FarmContent = Instance.new("Frame")
+local TpButton = Instance.new("TextButton")
+local UICorner_Tp = Instance.new("UICorner")
+local SellButton = Instance.new("TextButton")
+local UICorner_Sell = Instance.new("UICorner")
+local CreditLabel = Instance.new("TextLabel")
+local MiscContent = Instance.new("Frame")
+local PlaceholderLabel = Instance.new("TextLabel")
+local NotificationFrame = Instance.new("Frame")
+local NotifyText = Instance.new("TextLabel")
+local UICorner_Notify = Instance.new("UICorner")
+
+-- Properties:
+
+ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.ResetOnSpawn = false
+
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Position = UDim2.new(0.3, 0, 0.3, 0)
+MainFrame.Size = UDim2.new(0, 280, 0, 220)
+
+UICorner.CornerRadius = UDim.new(0.05, 0)
+UICorner.Parent = MainFrame
+
+TitleLabel.Parent = MainFrame
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.Size = UDim2.new(1, -60, 0, 30)
+TitleLabel.Font = Enum.Font.SourceSansBold
+TitleLabel.Text = "Yba"
+TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleLabel.TextSize = 20
+TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+CloseButton.Parent = MainFrame
+CloseButton.BackgroundTransparency = 1
+CloseButton.Position = UDim2.new(1, -30, 0, 0)
+CloseButton.Size = UDim2.new(0, 30, 0, 30)
+CloseButton.Font = Enum.Font.SourceSansBold
+CloseButton.Text = "X"
+CloseButton.TextColor3 = Color3.fromRGB(255, 100, 100)
+CloseButton.TextSize = 20
+
+MinimizeButton.Parent = MainFrame
+MinimizeButton.BackgroundTransparency = 1
+MinimizeButton.Position = UDim2.new(1, -60, 0, 0)
+MinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+MinimizeButton.Font = Enum.Font.SourceSansBold
+MinimizeButton.Text = "-"
+MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeButton.TextSize = 20
+
+TabContainer.Parent = MainFrame
+TabContainer.BackgroundTransparency = 1
+TabContainer.Position = UDim2.new(0, 0, 0, 30)
+TabContainer.Size = UDim2.new(1, 0, 0, 30)
+
+FarmTabButton.Parent = TabContainer
+FarmTabButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+FarmTabButton.Size = UDim2.new(0.5, 0, 1, 0)
+FarmTabButton.Font = Enum.Font.SourceSansSemibold
+FarmTabButton.Text = "Farm"
+FarmTabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+FarmTabButton.TextSize = 16
+
+UICorner_FarmTab.CornerRadius = UDim.new(0.1, 0)
+UICorner_FarmTab.Parent = FarmTabButton
+
+MiscTabButton.Parent = TabContainer
+MiscTabButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+MiscTabButton.Position = UDim2.new(0.5, 0, 0, 0)
+MiscTabButton.Size = UDim2.new(0.5, 0, 1, 0)
+MiscTabButton.Font = Enum.Font.SourceSansSemibold
+MiscTabButton.Text = "Misc"
+MiscTabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MiscTabButton.TextSize = 16
+
+UICorner_MiscTab.CornerRadius = UDim.new(0.1, 0)
+UICorner_MiscTab.Parent = MiscTabButton
+
+FarmContent.Parent = MainFrame
+FarmContent.BackgroundTransparency = 1
+FarmContent.Position = UDim2.new(0, 0, 0, 60)
+FarmContent.Size = UDim2.new(1, 0, 1, -60)
+FarmContent.Visible = true
+
+TpButton.Parent = FarmContent
+TpButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+TpButton.Position = UDim2.new(0.1, 0, 0.1, 0)
+TpButton.Size = UDim2.new(0.8, 0, 0, 40)
+TpButton.Font = Enum.Font.SourceSansSemibold
+TpButton.Text = "TP to items: off"
+TpButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+TpButton.TextSize = 16
+
+UICorner_Tp.Parent = TpButton
+
+SellButton.Parent = FarmContent
+SellButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+SellButton.Position = UDim2.new(0.1, 0, 0.4, 0)
+SellButton.Size = UDim2.new(0.8, 0, 0, 40)
+SellButton.Font = Enum.Font.SourceSansSemibold
+SellButton.Text = "Toggle selling: off"
+SellButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+SellButton.TextSize = 16
+
+UICorner_Sell.Parent = SellButton
+
+CreditLabel.Parent = FarmContent
+CreditLabel.BackgroundTransparency = 1
+CreditLabel.Position = UDim2.new(0.1, 0, 0.8, 0)
+CreditLabel.Size = UDim2.new(0.8, 0, 0, 20)
+CreditLabel.Font = Enum.Font.SourceSans
+CreditLabel.Text = "Made by Forcass"
+CreditLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+CreditLabel.TextSize = 14
+
+MiscContent.Parent = MainFrame
+MiscContent.BackgroundTransparency = 1
+MiscContent.Position = UDim2.new(0, 0, 0, 60)
+MiscContent.Size = UDim2.new(1, 0, 1, -60)
+MiscContent.Visible = false
+
+PlaceholderLabel.Parent = MiscContent
+PlaceholderLabel.BackgroundTransparency = 1
+PlaceholderLabel.Position = UDim2.new(0.1, 0, 0.1, 0)
+PlaceholderLabel.Size = UDim2.new(0.8, 0, 0, 40)
+PlaceholderLabel.Font = Enum.Font.SourceSans
+PlaceholderLabel.Text = "No misc features yet"
+PlaceholderLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+PlaceholderLabel.TextSize = 16
+
+NotificationFrame.Parent = ScreenGui
+NotificationFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+NotificationFrame.BackgroundTransparency = 0.2
+NotificationFrame.BorderSizePixel = 0
+NotificationFrame.Position = UDim2.new(1, -220, 1, 50)
+NotificationFrame.Size = UDim2.new(0, 220, 0, 50)
+NotificationFrame.Visible = false
+
+NotifyText.Parent = NotificationFrame
+NotifyText.BackgroundTransparency = 1
+NotifyText.Size = UDim2.new(1, 0, 1, 0)
+NotifyText.Font = Enum.Font.SourceSansSemibold
+NotifyText.TextColor3 = Color3.fromRGB(255, 255, 255)
+NotifyText.TextSize = 16
+NotifyText.TextWrapped = true
+NotifyText.Text = ""
+
+UICorner_Notify.CornerRadius = UDim.new(0.1, 0)
+UICorner_Notify.Parent = NotificationFrame
+
+-- Scripts:
+
+local function DragScript()
+    local script = Instance.new('LocalScript', TitleLabel)
+    
+    local dragging
+    local dragInput
+    local dragStart
+    local startPos
+    
+    local function update(input)
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+    
+    TitleLabel.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = MainFrame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    TitleLabel.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    
+    game:GetService("UserInputService").InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            update(input)
+        end
+    end)
+end
+coroutine.wrap(DragScript)()
+
+local function KeybindScript()
+    local script = Instance.new('LocalScript', ScreenGui)
+    local UIS = game:GetService("UserInputService")
+    
+    UIS.InputBegan:Connect(function(input, processed)
+        if processed then return end
+        if input.KeyCode == Enum.KeyCode.K then
+            MainFrame.Visible = not MainFrame.Visible
+        end
+    end)
+end
+coroutine.wrap(KeybindScript)()
+
+local function GuiLogicScript()
+    local script = Instance.new('LocalScript', ScreenGui)
+    
+    local TweenService = game:GetService("TweenService")
+    local tweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    
+    local function notify(message)
+        NotifyText.Text = message
+        NotificationFrame.Visible = true
+        local goalIn = {Position = UDim2.new(1, -220, 1, -50)}
+        local tweenIn = TweenService:Create(NotificationFrame, tweenInfo, goalIn)
+        tweenIn:Play()
+        tweenIn.Completed:Wait()
+        wait(3)
+        local goalOut = {Position = UDim2.new(1, -220, 1, 50)}
+        local tweenOut = TweenService:Create(NotificationFrame, tweenInfo, goalOut)
+        tweenOut:Play()
+    end
+    
+    local minimized = false
+    MinimizeButton.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        if minimized then
+            MainFrame.Size = UDim2.new(0, 280, 0, 30)
+            TabContainer.Visible = false
+            FarmContent.Visible = false
+            MiscContent.Visible = false
+            MinimizeButton.Text = "+"
+        else
+            MainFrame.Size = UDim2.new(0, 280, 0, 220)
+            TabContainer.Visible = true
+            FarmContent.Visible = true
+            MiscContent.Visible = false
+            MinimizeButton.Text = "-"
+        end
+    end)
+    
+    CloseButton.MouseButton1Click:Connect(function()
+        ScreenGui:Destroy()
+    end)
+    
+    FarmTabButton.MouseButton1Click:Connect(function()
+        FarmContent.Visible = true
+        MiscContent.Visible = false
+    end)
+    
+    MiscTabButton.MouseButton1Click:Connect(function()
+        FarmContent.Visible = false
+        MiscContent.Visible = true
+    end)
+    
+    local function travelTo(place) -- Does the math and teleports you in chunks to bypass tp anticheat
+		local plr = game.Players.LocalPlayer.Character.HumanoidRootPart
+		local vector = place.Position - plr.Position
+	
+		local length = vector.Magnitude
+	
+		local num_tp = math.ceil(length / 50)
+	
+		plr.CFrame = plr.CFrame + vector / num_tp
+	end
+
+	local tpOn = false
+	local sell = false
+	
+	function mainTP() -- Finds the item
+		while tpOn do
+			maxItems() -- Checks if I have max items before starting
+			for _, v in pairs(game.Workspace.Item_Spawns.Items:GetChildren()) do
+				local item = v:FindFirstChild("MeshPart")
+				if item and item:FindFirstChild("PointLight") then -- Checks if there actually is an item in this location
+					local proxPrompt = v.ProximityPrompt
+					while item:IsDescendantOf(game.Workspace) and tpOn do
+						local plr = game.Players.LocalPlayer.Character.HumanoidRootPart
+						travelTo(item)
+						if (item.Position - plr.Position).Magnitude < 5 then
+							maxItems()
+							fireproximityprompt(proxPrompt, 4)
+						end
+						task.wait(0.05)
+					end
+					maxItems()
+				end
+			end
+			task.wait(1)
+		end
+	end
+	
+	function maxItems()
+	
+		items = {
+			["Mysterious Arrow"] = 0,
+			["Rokakaka"] = 0,
+			["Gold Coin"] = 0,
+			["Diamond"] = 0,
+			["Pure Rokakaka"] = 0,
+			["Quinton's Glove"] = 0,
+			["Steel Ball"] = 0,
+			["Rib Cage of The Saint's Corpse"] = 0,
+			["Zepellin's Headband"] = 0,
+            ["Zeppeli's Hat"] = 0,
+			["Caesar's Headband"] = 0,
+			["Clackers"] = 0,
+			["Stone Mask"] = 0,
+			["Ancient Scroll"] = 0,
+			["Dio's Diary"] = 0,
+			["Pure Rokakaka"] = 0,
+			["Lucky Stone Mask"] = 0,
+			["Gold Umbrella"] = 0
+		}
+	
+		local maxLimits = {  -- Add to the list if I missed an item
+			["Mysterious Arrow"] = 25,
+			["Rokakaka"] = 25,
+			["Gold Coin"] = 45,
+			["Diamond"] = 25,
+			["Pure Rokakaka"] = 10,
+			["Quinton's Glove"] = 10,
+			["Steel Ball"] = 10,
+			["Rib Cage of The Saint's Corpse"] = 10,
+			["Zepellin's Headband"] = 10,
+            ["Zeppeli's Hat"] = 10,
+			["Caesar's Headband"] = 10,
+			["Clackers"] = 10,
+			["Stone Mask"] = 10,
+			["Ancient Scroll"] = 10,
+			["Dio's Diary"] = 10,
+			["Pure Rokakaka"] = 999,
+			["Lucky Stone Mask"] = 999,
+			["Lucky Arrow"] = 999,
+			["Gold Umbrella"] = 999,
+			["Left Arm of The Saint's Corpse"] = 999,
+			["Heart of The Saint's Corpse"] = 999,
+			["Pelvis of The Saint's Corpse"] = 999
+		}
+	
+		for _, item in pairs(game.Players.LocalPlayer.Backpack:GetChildren()) do
+			if items[item.Name] then
+				items[item.Name] = items[item.Name] + 1
+				if (items[item.Name] >= (maxLimits[item.Name] or 25)) and sell then
+					sellItem(item)
+					notify("Sold " .. item.Name)
+				end
+			end
+		end
+	end
+	
+	function sellItem(item)
+		local plrName = game.Players.LocalPlayer.Name
+		local itemName = game.Players.LocalPlayer.Backpack:FindFirstChild(item.Name)
+		itemName.Parent = game.Workspace.Living:FindFirstChild(plrName)
+	
+		local args = {
+			[1] = "EndDialogue",
+			[2] = {
+				["NPC"] = "Merchant",
+				["Option"] = "Option2",
+				["Dialogue"] = "Dialogue5"
+			}
+		}
+	
+		game:GetService("Players").LocalPlayer.Character.RemoteEvent:FireServer(unpack(args))
+	end
+    
+    TpButton.MouseButton1Click:Connect(function()
+        tpOn = not tpOn
+        if tpOn then
+            TpButton.Text = "TP to items: on"
+            notify("TP to items ON")
+            coroutine.wrap(mainTP)()
+        else
+            TpButton.Text = "TP to items: off"
+            notify("TP to items OFF")
+        end
+    end)
+    
+    SellButton.MouseButton1Click:Connect(function()
+        sell = not sell
+        if sell then
+            SellButton.Text = "Toggle selling: on"
+            notify("Selling ON")
+        else
+            SellButton.Text = "Toggle selling: off"
+            notify("Selling OFF")
+        end
+        maxItems()
+    end)
+end
+coroutine.wrap(GuiLogicScript)()
