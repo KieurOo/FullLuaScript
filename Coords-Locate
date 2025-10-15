@@ -1,12 +1,20 @@
+-- TeleportPlus (added tween speed detect, Stud method, anti-teleport warning, better minimize)
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local hasAntiCheat = false
+local hasStrongAntiCheat = false
+local warnedAntiTeleport = false
 
+local selectedMethod = nil
+local clickConnection = nil
+
+-- UI creation (unchanged mostly, but Methods list and minimize behavior updated)
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "TeleportPlusGui"
 screenGui.ResetOnSpawn = false
@@ -14,8 +22,8 @@ screenGui.Parent = PlayerGui
 
 local container = Instance.new("Frame")
 container.Name = "Container"
-container.Size = UDim2.fromOffset(420, 160)
-container.Position = UDim2.new(0.5, -210, 0.12, 0)
+container.Size = UDim2.fromOffset(500, 160)
+container.Position = UDim2.new(0.5, -250, 0.12, 0)
 container.AnchorPoint = Vector2.new(0.5, 0)
 container.BackgroundTransparency = 0
 container.BackgroundColor3 = Color3.fromRGB(24, 26, 35)
@@ -34,7 +42,7 @@ header.Parent = container
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(1, -140, 1, 0) -- adjusted to make room for extra button
+title.Size = UDim2.new(1, -140, 1, 0)
 title.Position = UDim2.new(0, 12, 0, 0)
 title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold
@@ -137,6 +145,20 @@ playersBtn.Parent = container
 local playersCorner = Instance.new("UICorner", playersBtn)
 playersCorner.CornerRadius = UDim.new(0, 8)
 
+local methodsBtn = Instance.new("TextButton")
+methodsBtn.Name = "Methods"
+methodsBtn.Size = UDim2.fromOffset(120, 32)
+methodsBtn.Position = UDim2.new(0, 264, 1, -44)
+methodsBtn.Font = Enum.Font.GothamBold
+methodsBtn.TextSize = 14
+methodsBtn.Text = "Methods"
+methodsBtn.TextColor3 = Color3.fromRGB(235,235,235)
+methodsBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 75)
+methodsBtn.Parent = container
+
+local methodsCorner = Instance.new("UICorner", methodsBtn)
+methodsCorner.CornerRadius = UDim.new(0, 8)
+
 local dropdownFrame = Instance.new("ScrollingFrame")
 dropdownFrame.Name = "PlayerDropdown"
 dropdownFrame.Size = UDim2.new(1, -16, 0, 100)
@@ -153,6 +175,61 @@ ddCorner.CornerRadius = UDim.new(0, 8)
 local uiListLayout = Instance.new("UIListLayout", dropdownFrame)
 uiListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 uiListLayout.Padding = UDim.new(0, 2)
+
+local methodsDropdown = Instance.new("ScrollingFrame")
+methodsDropdown.Name = "MethodsDropdown"
+methodsDropdown.Size = UDim2.new(1, -16, 0, 100)
+methodsDropdown.Position = UDim2.new(0, 8, 0, 98)
+methodsDropdown.BackgroundColor3 = Color3.fromRGB(16, 18, 25)
+methodsDropdown.BorderSizePixel = 0
+methodsDropdown.ScrollBarThickness = 6
+methodsDropdown.Visible = false
+methodsDropdown.Parent = container
+
+local mdCorner = Instance.new("UICorner", methodsDropdown)
+mdCorner.CornerRadius = UDim.new(0, 8)
+
+local mdListLayout = Instance.new("UIListLayout", methodsDropdown)
+mdListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+mdListLayout.Padding = UDim.new(0, 2)
+-- end UI creation ---------------------------------------------------------------
+
+-- Reset method variables and functions
+local teleportOnRespawn = false
+local deathPosition = Vector3.new()
+
+local function onRespawn(character)
+    local humanoid = character:WaitForChild("Humanoid", 10)
+    local rootPart = character:WaitForChild("HumanoidRootPart", 10)
+    if not humanoid or not rootPart then return end
+
+    if teleportOnRespawn and deathPosition.Magnitude > 0 then
+        local targetCFrame = CFrame.new(deathPosition)
+        local startTime = tick()
+        local forceTpConn
+        forceTpConn = RunService.RenderStepped:Connect(function()
+            if tick() - startTime > 3 then
+                if forceTpConn then forceTpConn:Disconnect() end
+                return
+            end
+            if rootPart and rootPart.Parent then
+                pcall(function()
+                    rootPart.CFrame = targetCFrame
+                end)
+            end
+        end)
+
+        teleportOnRespawn = false
+        deathPosition = Vector3.new()
+    end
+end
+
+local characterAddedConnection
+local function initResetTeleport()
+    if characterAddedConnection then characterAddedConnection:Disconnect() end
+    characterAddedConnection = LocalPlayer.CharacterAdded:Connect(onRespawn)
+end
+initResetTeleport()
 
 local function parseCoords(s)
 	if not s then
@@ -176,52 +253,247 @@ local function parseCoords(s)
 	return Vector3.new(x, y, z)
 end
 
-local function teleportTo(v3, force)
-	force = force or false
+-- Detect a tween speed based on humanoid WalkSpeed (best-effort)
+local function detectTweenSpeed()
+	local char = LocalPlayer.Character
+	local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
+	if humanoid and humanoid.WalkSpeed then
+		-- choose a multiplier so we use a speed that is clearly above walk speed
+		return math.max(32, humanoid.WalkSpeed * 5)
+	end
+	-- fallback
+	return 150
+end
+
+-- Improved teleport function (returns boolean, optional error message)
+local function teleportTo(v3, method, cancelTable)
+	method = method or "simple"
+	cancelTable = cancelTable or {cancel = false}
 	local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 	if not char then return false, "no character" end
 	local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
 	if not hrp then return false, "no root part" end
+	local humanoid = char:FindFirstChildWhichIsA("Humanoid")
 	local oldPos = hrp.Position
-	local ok, err = pcall(function()
-		hrp.CFrame = CFrame.new(v3)
-	end)
-	if not ok then
-		return false, tostring(err or "unknown error")
-	end
-	if force then
-		local attempts = 0
-		local maxAttempts = 20  -- Adjust as needed to prevent infinite loops
-		while attempts < maxAttempts do
-			hrp.CFrame = CFrame.new(v3)
-			task.wait(0.05)  -- Small delay between attempts
-			local currentPos = hrp.Position
-			if (currentPos - v3).Magnitude < 5 then
-				return true
-			end
-			attempts = attempts + 1
+
+	local previousPlatformStand
+	local previousAnchored
+	local function setControlState(enablePlatformStand, setAnchored)
+		if humanoid then
+			previousPlatformStand = humanoid.PlatformStand
+			humanoid.PlatformStand = enablePlatformStand
 		end
-		return false, "failed after multiple attempts"
-	else
-		task.wait(0.5)
-		local currentPos = hrp.Position
-		local distToTarget = (currentPos - v3).Magnitude
-		local distToOld = (currentPos - oldPos).Magnitude
-		if distToTarget > 5 and distToOld < 5 then
+		if hrp and hrp:IsA("BasePart") then
+			previousAnchored = hrp.Anchored
+			if setAnchored ~= nil then
+				hrp.Anchored = setAnchored
+			end
+		end
+	end
+	local function restoreControlState()
+		if humanoid and previousPlatformStand ~= nil then
+			pcall(function() humanoid.PlatformStand = previousPlatformStand end)
+		end
+		if hrp and previousAnchored ~= nil then
+			pcall(function() hrp.Anchored = previousAnchored end)
+		end
+	end
+
+	-- SIMPLE
+	if method == "simple" then
+		pcall(function() hrp.CFrame = CFrame.new(v3) end)
+		task.wait(0.05)
+		if (hrp.Position - v3).Magnitude < 5 then
+			return true
+		else
 			return false, "reverted"
 		end
-		return true
 	end
+
+	-- LOCK
+	if method == "lock" then
+		local startTime = tick()
+		local maxTime = 8
+		setControlState(true, true)
+		while (tick() - startTime) < maxTime and not cancelTable.cancel do
+			if not hrp.Parent then break end
+			pcall(function() hrp.CFrame = CFrame.new(v3) end)
+			task.wait(0.02)
+		end
+		restoreControlState()
+		if cancelTable.cancel then return false, "cancelled" end
+		if hrp and hrp.Parent and (hrp.Position - v3).Magnitude < 5 then
+			return true
+		else
+			return false, "reverted"
+		end
+	end
+
+	-- TWEEN (use detected tween speed)
+	if method == "tween" then
+		local speed = detectTweenSpeed()
+		setControlState(true, false)
+
+		local upPos = hrp.Position + Vector3.new(0, 100, 0)
+		local upTime = 1.0
+		local upTweenInfo = TweenInfo.new(upTime, Enum.EasingStyle.Linear)
+		local upGoal = {CFrame = CFrame.new(upPos)}
+		local upTween = TweenService:Create(hrp, upTweenInfo, upGoal)
+		upTween:Play()
+		while upTween.PlaybackState ~= Enum.PlaybackState.Completed and not cancelTable.cancel do
+			task.wait()
+		end
+		if cancelTable.cancel then
+			upTween:Cancel()
+			restoreControlState()
+			return false, "cancelled"
+		end
+
+		local targetCF = CFrame.new(v3)
+		local distance = (upPos - v3).Magnitude
+		local time = distance / math.max(1, speed)
+		if time < 0.05 then time = 0.05 end
+		local tweenInfo = TweenInfo.new(time, Enum.EasingStyle.Linear)
+		local goal = {CFrame = targetCF}
+		local tween = TweenService:Create(hrp, tweenInfo, goal)
+		tween:Play()
+		while tween.PlaybackState ~= Enum.PlaybackState.Completed and not cancelTable.cancel do
+			task.wait()
+		end
+		if cancelTable.cancel then
+			tween:Cancel()
+			restoreControlState()
+			return false, "cancelled"
+		end
+
+		restoreControlState()
+		if hrp and (hrp.Position - v3).Magnitude < 5 then
+			return true
+		else
+			return false, "reverted"
+		end
+	end
+
+	-- STUD: step-by-step by computed max studs
+	if method == "stud" then
+		-- compute direction
+		local startPos = hrp.Position
+		local dirVec = (v3 - startPos)
+		local totalDist = dirVec.Magnitude
+		if totalDist < 0.5 then return true end
+		local unitDir = dirVec.Unit
+
+		-- probe for largest single-step that doesn't revert (1..maxProbe)
+		local maxProbe = 80 -- limit probe to 80 studs (adjustable)
+		local lastGood = 0
+		-- try increasingly larger single-step values until it fails
+		for s = 1, maxProbe do
+			if cancelTable.cancel then break end
+			local testPos = startPos + unitDir * s
+			pcall(function() hrp.CFrame = CFrame.new(testPos) end)
+			task.wait(0.05)
+			if hrp.Parent and (hrp.Position - testPos).Magnitude < 3 then
+				lastGood = s
+			else
+				-- first fail => stop probing
+				break
+			end
+		end
+
+		if lastGood == 0 then
+			-- no single stud success -> anti-cheat blocks tiny teleports
+			hasAntiCheat = true
+			return false, "blocked"
+		end
+
+		-- now move in chunks of lastGood until reaching target
+		local traveled = 0
+		local currentBase = hrp.Position
+		while traveled + 0.2 < totalDist and not cancelTable.cancel do
+			local step = math.min(lastGood, totalDist - traveled)
+			local nextPos = startPos + unitDir * (traveled + step)
+			pcall(function() hrp.CFrame = CFrame.new(nextPos) end)
+			task.wait(0.05)
+			if not hrp.Parent or (hrp.Position - nextPos).Magnitude > 5 then
+				-- step reverted/blocked
+				hasAntiCheat = true
+				return false, "blocked"
+			end
+			traveled = traveled + step
+		end
+
+		-- final set to exact target
+		pcall(function() hrp.CFrame = CFrame.new(v3) end)
+		task.wait(0.05)
+		if hrp.Parent and (hrp.Position - v3).Magnitude < 5 then
+			return true
+		else
+			return false, "reverted"
+		end
+	end
+
+	-- RESET
+	if method == "reset" then
+		if not humanoid then return false, "no humanoid" end
+
+		local startTime = tick()
+		local lockTime = 2.5
+		setControlState(true, true)
+		while (tick() - startTime) < lockTime and not cancelTable.cancel do
+			if not hrp.Parent then break end
+			pcall(function() hrp.CFrame = CFrame.new(v3) end)
+			task.wait(0.02)
+		end
+		if hrp then
+			pcall(function() hrp.Anchored = previousAnchored end)
+		end
+
+		if cancelTable.cancel then
+			restoreControlState()
+			return false, "cancelled"
+		end
+
+		deathPosition = v3 + Vector3.new(0, 5, 0)
+		teleportOnRespawn = true
+
+		pcall(function()
+			humanoid.Health = 0
+		end)
+
+		local newChar = LocalPlayer.CharacterAdded:Wait()
+		local newRoot = newChar:WaitForChild("HumanoidRootPart", 10)
+		local waited = 0
+		local okPlaced = false
+		while waited < 5 do
+			if newRoot and (newRoot.Position - v3).Magnitude < 6 then
+				okPlaced = true
+				break
+			end
+			wait(0.3)
+			waited = waited + 0.3
+		end
+		teleportOnRespawn = false
+		deathPosition = Vector3.new()
+		restoreControlState()
+		if okPlaced then
+			return true
+		else
+			return false, "reset failed"
+		end
+	end
+
+	return false, "unknown method"
 end
 
+-- Popup / confirm UI helpers (unchanged logic, small tweaks)
 local function showPopup(text, textColor, fromTop)
 	textColor = textColor or Color3.fromRGB(255, 255, 255)
 	fromTop = fromTop or false
 	local popupFrame = Instance.new("Frame")
 	popupFrame.Name = "Popup"
-	popupFrame.Size = UDim2.fromOffset(300, 40)
+	popupFrame.Size = UDim2.fromOffset(320, 40)
 	if fromTop then
-		popupFrame.Position = UDim2.new(0.5, 0, 0, -40)  -- Start above screen
+		popupFrame.Position = UDim2.new(0.5, 0, 0, -40)
 		popupFrame.AnchorPoint = Vector2.new(0.5, 0)
 	else
 		popupFrame.Position = UDim2.new(0.5, 0, 1, -20)
@@ -245,20 +517,18 @@ local function showPopup(text, textColor, fromTop)
 	popupLabel.TextTransparency = 1
 	popupLabel.Parent = popupFrame
 
-	-- Fade in and slide in if from top
-	local tweenInFrame = TweenService:Create(popupFrame, TweenInfo.new(0.3), {BackgroundTransparency = 0})
-	local tweenInLabel = TweenService:Create(popupLabel, TweenInfo.new(0.3), {TextTransparency = 0})
+	local tweenInFrame = TweenService:Create(popupFrame, TweenInfo.new(0.28), {BackgroundTransparency = 0})
+	local tweenInLabel = TweenService:Create(popupLabel, TweenInfo.new(0.28), {TextTransparency = 0})
 	if fromTop then
-		local tweenSlide = TweenService:Create(popupFrame, TweenInfo.new(0.3), {Position = UDim2.new(0.5, 0, 0, 20)})
+		local tweenSlide = TweenService:Create(popupFrame, TweenInfo.new(0.28), {Position = UDim2.new(0.5, 0, 0, 20)})
 		tweenSlide:Play()
 	end
 	tweenInFrame:Play()
 	tweenInLabel:Play()
 
-	-- Fade out after delay
 	task.delay(3, function()
-		local tweenOutFrame = TweenService:Create(popupFrame, TweenInfo.new(0.3), {BackgroundTransparency = 1})
-		local tweenOutLabel = TweenService:Create(popupLabel, TweenInfo.new(0.3), {TextTransparency = 1})
+		local tweenOutFrame = TweenService:Create(popupFrame, TweenInfo.new(0.28), {BackgroundTransparency = 1})
+		local tweenOutLabel = TweenService:Create(popupLabel, TweenInfo.new(0.28), {TextTransparency = 1})
 		tweenOutFrame:Play()
 		tweenOutLabel:Play()
 		tweenOutLabel.Completed:Connect(function()
@@ -267,11 +537,11 @@ local function showPopup(text, textColor, fromTop)
 	end)
 end
 
-local function showConfirm(callback)
+local function showConfirm(message, callback)
 	local confirmFrame = Instance.new("Frame")
 	confirmFrame.Name = "ConfirmPopup"
-	confirmFrame.Size = UDim2.fromOffset(300, 120)
-	confirmFrame.Position = UDim2.new(0.5, -150, 0.5, -60)
+	confirmFrame.Size = UDim2.fromOffset(320, 120)
+	confirmFrame.Position = UDim2.new(0.5, -160, 0.5, -60)
 	confirmFrame.BackgroundColor3 = Color3.fromRGB(24, 26, 35)
 	confirmFrame.BorderSizePixel = 0
 	confirmFrame.Parent = screenGui
@@ -283,7 +553,7 @@ local function showConfirm(callback)
 	msgLabel.Size = UDim2.new(1, -20, 0, 60)
 	msgLabel.Position = UDim2.new(0, 10, 0, 10)
 	msgLabel.BackgroundTransparency = 1
-	msgLabel.Text = "This game has anti cheat teleport i cant teleport you it may cause a ban to you account DO YOU STILL WANNA CONTINUE?"
+	msgLabel.Text = message or "Proceed?"
 	msgLabel.Font = Enum.Font.Gotham
 	msgLabel.TextSize = 14
 	msgLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
@@ -327,6 +597,191 @@ local function showConfirm(callback)
 	end)
 end
 
+local function showFailed(callback)
+	local failedFrame = Instance.new("Frame")
+	failedFrame.Name = "FailedPopup"
+	failedFrame.Size = UDim2.fromOffset(320, 120)
+	failedFrame.Position = UDim2.new(0.5, -160, 0.5, -60)
+	failedFrame.BackgroundColor3 = Color3.fromRGB(24, 26, 35)
+	failedFrame.BorderSizePixel = 0
+	failedFrame.Parent = screenGui
+
+	local ffCorner = Instance.new("UICorner", failedFrame)
+	ffCorner.CornerRadius = UDim.new(0, 10)
+
+	local msgLabel = Instance.new("TextLabel")
+	msgLabel.Size = UDim2.new(1, -20, 0, 60)
+	msgLabel.Position = UDim2.new(0, 10, 0, 10)
+	msgLabel.BackgroundTransparency = 1
+	msgLabel.Text = "Teleport Failed. Do you want to try again?"
+	msgLabel.Font = Enum.Font.Gotham
+	msgLabel.TextSize = 14
+	msgLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
+	msgLabel.TextWrapped = true
+	msgLabel.Parent = failedFrame
+
+	local yesBtn = Instance.new("TextButton")
+	yesBtn.Size = UDim2.fromOffset(100, 30)
+	yesBtn.Position = UDim2.new(0, 40, 1, -40)
+	yesBtn.Text = "Yes"
+	yesBtn.TextColor3 = Color3.fromRGB(255, 0, 0)
+	yesBtn.Font = Enum.Font.GothamBold
+	yesBtn.TextSize = 16
+	yesBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	yesBtn.Parent = failedFrame
+
+	local yCorner = Instance.new("UICorner", yesBtn)
+	yCorner.CornerRadius = UDim.new(0, 6)
+
+	local noBtn = Instance.new("TextButton")
+	noBtn.Size = UDim2.fromOffset(100, 30)
+	noBtn.Position = UDim2.new(1, -140, 1, -40)
+	noBtn.Text = "No"
+	noBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
+	noBtn.Font = Enum.Font.GothamBold
+	noBtn.TextSize = 16
+	noBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	noBtn.Parent = failedFrame
+
+	local nCorner = Instance.new("UICorner", noBtn)
+	nCorner.CornerRadius = UDim.new(0, 6)
+
+	yesBtn.MouseButton1Click:Connect(function()
+		failedFrame:Destroy()
+		callback(true)
+	end)
+
+	noBtn.MouseButton1Click:Connect(function()
+		failedFrame:Destroy()
+		callback(false)
+	end)
+end
+
+local function showResetConfirm(callback)
+	local resetFrame = Instance.new("Frame")
+	resetFrame.Name = "ResetPopup"
+	resetFrame.Size = UDim2.fromOffset(320, 120)
+	resetFrame.Position = UDim2.new(0.5, -160, 0.5, -60)
+	resetFrame.BackgroundColor3 = Color3.fromRGB(24, 26, 35)
+	resetFrame.BorderSizePixel = 0
+	resetFrame.Parent = screenGui
+
+	local rfCorner = Instance.new("UICorner", resetFrame)
+	rfCorner.CornerRadius = UDim.new(0, 10)
+
+	local msgLabel = Instance.new("TextLabel")
+	msgLabel.Size = UDim2.new(1, -20, 0, 60)
+	msgLabel.Position = UDim2.new(0, 10, 0, 10)
+	msgLabel.BackgroundTransparency = 1
+	msgLabel.Text = "All standard methods failed. Do you want to try the reset method? Warning: This will cause your character to die and respawn at the target."
+	msgLabel.Font = Enum.Font.Gotham
+	msgLabel.TextSize = 14
+	msgLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
+	msgLabel.TextWrapped = true
+	msgLabel.Parent = resetFrame
+
+	local yesBtn = Instance.new("TextButton")
+	yesBtn.Size = UDim2.fromOffset(100, 30)
+	yesBtn.Position = UDim2.new(0, 40, 1, -40)
+	yesBtn.Text = "Yes"
+	yesBtn.TextColor3 = Color3.fromRGB(255, 0, 0)
+	yesBtn.Font = Enum.Font.GothamBold
+	yesBtn.TextSize = 16
+	yesBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	yesBtn.Parent = resetFrame
+
+	local yCorner = Instance.new("UICorner", yesBtn)
+	yCorner.CornerRadius = UDim.new(0, 6)
+
+	local noBtn = Instance.new("TextButton")
+	noBtn.Size = UDim2.fromOffset(100, 30)
+	noBtn.Position = UDim2.new(1, -140, 1, -40)
+	noBtn.Text = "No"
+	noBtn.TextColor3 = Color3.fromRGB(0, 255, 0)
+	noBtn.Font = Enum.Font.GothamBold
+	noBtn.TextSize = 16
+	noBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	noBtn.Parent = resetFrame
+
+	local nCorner = Instance.new("UICorner", noBtn)
+	nCorner.CornerRadius = UDim.new(0, 6)
+
+	yesBtn.MouseButton1Click:Connect(function()
+		resetFrame:Destroy()
+		callback(true)
+	end)
+
+	noBtn.MouseButton1Click:Connect(function()
+		resetFrame:Destroy()
+		callback(false)
+	end)
+end
+
+local function showProgress(message, onCancelCallback)
+	local progressFrame = Instance.new("Frame")
+	progressFrame.Name = "ProgressPopup"
+	progressFrame.Size = UDim2.fromOffset(320, 120)
+	progressFrame.Position = UDim2.new(0.5, -160, 0.5, -60)
+	progressFrame.BackgroundColor3 = Color3.fromRGB(24, 26, 35)
+	progressFrame.BorderSizePixel = 0
+	progressFrame.Parent = screenGui
+
+	local pfCorner = Instance.new("UICorner", progressFrame)
+	pfCorner.CornerRadius = UDim.new(0, 10)
+
+	local msgLabel = Instance.new("TextLabel")
+	msgLabel.Size = UDim2.new(1, -20, 0, 60)
+	msgLabel.Position = UDim2.new(0, 10, 0, 10)
+	msgLabel.BackgroundTransparency = 1
+	msgLabel.Text = message
+	msgLabel.Font = Enum.Font.Gotham
+	msgLabel.TextSize = 14
+	msgLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
+	msgLabel.TextWrapped = true
+	msgLabel.Parent = progressFrame
+
+	local cancelBtn = Instance.new("TextButton")
+	cancelBtn.Size = UDim2.fromOffset(100, 30)
+	cancelBtn.Position = UDim2.new(0.5, -50, 1, -40)
+	cancelBtn.Text = "Cancel"
+	cancelBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	cancelBtn.Font = Enum.Font.GothamBold
+	cancelBtn.TextSize = 16
+	cancelBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	cancelBtn.Parent = progressFrame
+
+	local cCorner = Instance.new("UICorner", cancelBtn)
+	cCorner.CornerRadius = UDim.new(0, 6)
+
+	cancelBtn.MouseButton1Click:Connect(function()
+		if type(onCancelCallback) == "function" then
+			onCancelCallback()
+		end
+		if progressFrame then
+			progressFrame:Destroy()
+		end
+	end)
+
+	return function()
+		if progressFrame and progressFrame.Parent then
+			progressFrame:Destroy()
+		end
+	end
+end
+
+-- Anti-teleport one-time warning
+local function showAntiTeleportWarning(callback)
+	if warnedAntiTeleport then
+		callback(true)
+		return
+	end
+	showConfirm("This game has Block anti teleport. Do you still wanna continue? (Shown once)", function(yes)
+		if yes then warnedAntiTeleport = true end
+		callback(yes)
+	end)
+end
+
+-- attempt runner with anti-cheat confirm behavior
 local function tryRun()
 	local v3, err = parseCoords(inputBox.Text)
 	if not v3 then
@@ -334,48 +789,113 @@ local function tryRun()
 		return
 	end
 
-	local function performTeleport(force)
-		return teleportTo(v3, force)
-	end
-
 	local function showSuccess()
-		local coordStr = string.format("%.3f, %.3f, %.3f", v3.X, v3.Y, v3.Z)
-		showPopup("Teleported to (" .. coordStr .. ")", Color3.fromRGB(100, 255, 100))
+		showPopup("Done! You are teleported", Color3.fromRGB(100, 255, 100))
 	end
 
-	if hasAntiCheat then
-		showConfirm(function(yes)
-			if yes then
-				local ok, terr = performTeleport(true)
-				if ok then
+	local function performAttempt(method)
+		local cancelTable = {cancel = false}
+		local closeProgress
+		local message
+		if method == "lock" then
+			message = "Force Teleporting..."
+		elseif method == "tween" then
+			message = "Tween Teleporting..."
+		elseif method == "reset" then
+			message = "Resetting..."
+		elseif method == "stud" then
+			message = "Stud teleporting..."
+		else
+			message = "Teleporting..."
+		end
+		closeProgress = showProgress(message, function() cancelTable.cancel = true end)
+		local ok, terr = teleportTo(v3, method, cancelTable)
+		closeProgress()
+		return ok, terr
+	end
+
+	-- If anti-cheat known and not warned, show one-time warning
+	local function proceedWithMethod(meth)
+		if hasAntiCheat and not warnedAntiTeleport then
+			showAntiTeleportWarning(function(ok)
+				if not ok then
+					showPopup("Cancelled by user", Color3.fromRGB(255, 150, 100))
+					return
+				end
+				-- proceed
+				local ok2, terr2 = performAttempt(meth)
+				if ok2 then
 					showSuccess()
 				else
-					showPopup("Teleport failed: " .. tostring(terr), Color3.fromRGB(255, 100, 100))
-				end
-			end
-		end)
-	else
-		local ok, terr = performTeleport(false)
-		if ok then
-			showSuccess()
-		elseif terr == "reverted" then
-			hasAntiCheat = true
-			showConfirm(function(yes)
-				if yes then
-					local ok, terr = performTeleport(true)
-					if ok then
-						showSuccess()
+					if terr2 == "cancelled" then
+						showPopup("Teleport cancelled", Color3.fromRGB(255, 100, 100))
+					elseif terr2 == "reverted" or terr2 == "blocked" then
+						showPopup("Failed to teleport due to a game That Blocks Anti Teleport", Color3.fromRGB(255, 100, 100))
 					else
-						showPopup("Teleport failed: " .. tostring(terr), Color3.fromRGB(255, 100, 100))
+						showPopup("Teleport failed: " .. tostring(terr2), Color3.fromRGB(255, 100, 100))
 					end
 				end
 			end)
 		else
-			showPopup("Teleport failed: " .. tostring(terr), Color3.fromRGB(255, 100, 100))
+			local ok, terr = performAttempt(meth)
+			if ok then
+				showSuccess()
+			else
+				if terr == "cancelled" then
+					showPopup("Teleport cancelled", Color3.fromRGB(255, 100, 100))
+				elseif terr == "reverted" or terr == "blocked" then
+					showPopup("Failed to teleport due to a game That Blocks Anti Teleport", Color3.fromRGB(255, 100, 100))
+					hasAntiCheat = true
+				else
+					showPopup("Teleport failed: " .. tostring(terr), Color3.fromRGB(255, 100, 100))
+				end
+			end
 		end
+	end
+
+	-- If a specific method is selected, use it.
+	if selectedMethod and selectedMethod ~= "simple" then
+		proceedWithMethod(selectedMethod)
+		return
+	end
+
+	-- Otherwise automatic sequence
+	local method = selectedMethod or "simple"
+	local ok, terr = teleportTo(v3, method)
+	if ok then
+		showSuccess()
+		return
+	end
+
+	if terr == "reverted" then
+		hasAntiCheat = true
+		showConfirm("Teleport reverted - anti-cheat detected. Try alternative methods?", function(yes)
+			if not yes then
+				showPopup("Cancelled by user", Color3.fromRGB(255, 150, 100))
+				return
+			end
+			local tryOrder = {"tween", "lock", "stud"}
+			for _, m in ipairs(tryOrder) do
+				-- each attempt will run the one-time anti-teleport warning if needed
+				proceedWithMethod(m)
+				-- if anti-cheat flagged by attempt, break (proceedWithMethod shows popup)
+				if hasAntiCheat then break end
+			end
+			-- if still not teleported, prompt reset
+			if not hasAntiCheat then
+				showResetConfirm(function(accepted)
+					if not accepted then return end
+					proceedWithMethod("reset")
+				end)
+			end
+		end)
+	else
+		-- generic failure
+		showPopup("Teleport failed: " .. tostring(terr), Color3.fromRGB(255, 100, 100))
 	end
 end
 
+-- UI interactions (players, methods — added Stud)
 updBtn.MouseButton1Click:Connect(function()
 	local char = LocalPlayer.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -389,9 +909,10 @@ updBtn.MouseButton1Click:Connect(function()
 end)
 
 playersBtn.MouseButton1Click:Connect(function()
+	methodsDropdown.Visible = false
 	dropdownFrame.Visible = not dropdownFrame.Visible
 	local targetHeight = dropdownFrame.Visible and 260 or 160
-	TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(420, targetHeight)}):Play()
+	TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(500, targetHeight)}):Play()
 	if not dropdownFrame.Visible then return end
 	for _, child in ipairs(dropdownFrame:GetChildren()) do
 		if child:IsA("TextButton") then child:Destroy() end
@@ -419,11 +940,73 @@ playersBtn.MouseButton1Click:Connect(function()
 				showPopup("Player has no position", Color3.fromRGB(255, 100, 100))
 			end
 			dropdownFrame.Visible = false
-			TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(420, 160)}):Play()
+			TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(500, 160)}):Play()
 		end)
 	end
 	local num = #players
 	dropdownFrame.CanvasSize = UDim2.new(0, 0, 0, num * 32)
+end)
+
+methodsBtn.MouseButton1Click:Connect(function()
+	dropdownFrame.Visible = false
+	methodsDropdown.Visible = not methodsDropdown.Visible
+	local targetHeight = methodsDropdown.Visible and 300 or 160
+	TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(500, targetHeight)}):Play()
+	if not methodsDropdown.Visible then return end
+	for _, child in ipairs(methodsDropdown:GetChildren()) do
+		if child:IsA("TextButton") then child:Destroy() end
+	end
+	local methods = {"Normal", "Tween", "Force", "Reset", "Stud", "Click"}
+	for _, meth in ipairs(methods) do
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, 0, 0, 30)
+		btn.BackgroundColor3 = Color3.fromRGB(24, 26, 35)
+		btn.Text = meth
+		btn.Font = Enum.Font.Gotham
+		btn.TextSize = 14
+		btn.TextColor3 = Color3.fromRGB(235, 235, 235)
+		local btnCorner = Instance.new("UICorner", btn)
+		btnCorner.CornerRadius = UDim.new(0, 6)
+		btn.Parent = methodsDropdown
+		btn.MouseButton1Click:Connect(function()
+			if meth == "Click" then
+				showPopup("Click mode enabled. Click in the game world to paste coordinates to the box.", Color3.fromRGB(100, 255, 100))
+				if clickConnection then clickConnection:Disconnect() end
+				clickConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+					if gameProcessed then return end
+					if input.UserInputType == Enum.UserInputType.MouseButton1 then
+						local mouse = LocalPlayer:GetMouse()
+						if mouse.Target then
+							local pos = mouse.Hit.Position
+							inputBox.Text = string.format("%.6f, %.6f, %.6f", pos.X, pos.Y, pos.Z)
+							showPopup("Pasted click coordinates", Color3.fromRGB(100, 255, 100))
+						end
+					end
+				end)
+			else
+				if clickConnection then
+					clickConnection:Disconnect()
+					clickConnection = nil
+				end
+				if meth == "Normal" then
+					selectedMethod = "simple"
+				elseif meth == "Tween" then
+					selectedMethod = "tween"
+				elseif meth == "Force" then
+					selectedMethod = "lock"
+				elseif meth == "Reset" then
+					selectedMethod = "reset"
+				elseif meth == "Stud" then
+					selectedMethod = "stud"
+				end
+				showPopup("Selected method: " .. meth, Color3.fromRGB(100, 255, 100))
+			end
+			methodsDropdown.Visible = false
+			TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(500, 160)}):Play()
+		end)
+	end
+	local num = #methods
+	methodsDropdown.CanvasSize = UDim2.new(0, 0, 0, num * 32)
 end)
 
 runBtn.MouseButton1Click:Connect(tryRun)
@@ -432,9 +1015,12 @@ inputBox.FocusLost:Connect(function(enterPressed)
 end)
 
 closeBtn.MouseButton1Click:Connect(function()
+	if clickConnection then clickConnection:Disconnect() end
 	screenGui:Destroy()
 end)
 
+-- Minimize now spawns a draggable "C" button to restore
+local restoreButton = nil
 local minimized = false
 miniBtn.MouseButton1Click:Connect(function()
 	minimized = not minimized
@@ -446,16 +1032,76 @@ miniBtn.MouseButton1Click:Connect(function()
 		end
 		inputBox.Visible = false
 		dropdownFrame.Visible = false
-		local tween = TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(420, 36)})
+		methodsDropdown.Visible = false
+		local tween = TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(500, 36)})
 		tween:Play()
 		miniBtn.Text = "+"
+		-- create small draggable restore button (C)
+		if not restoreButton or not restoreButton.Parent then
+			restoreButton = Instance.new("TextButton")
+			restoreButton.Name = "CompactRestore"
+			restoreButton.Size = UDim2.fromOffset(40, 40)
+			restoreButton.Position = UDim2.new(0.02, 0, 0.9, 0)
+			restoreButton.AnchorPoint = Vector2.new(0, 0)
+			restoreButton.Text = "C"
+			restoreButton.Font = Enum.Font.GothamBold
+			restoreButton.TextSize = 18
+			restoreButton.BackgroundColor3 = Color3.fromRGB(55,120,255)
+			restoreButton.Parent = screenGui
+			local cbCorner = Instance.new("UICorner", restoreButton)
+			cbCorner.CornerRadius = UDim.new(0, 8)
+
+			-- draggable logic
+			local dragging = false
+			local dragStart, startPos
+			restoreButton.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+					dragging = true
+					dragStart = input.Position
+					startPos = restoreButton.Position
+					input.Changed:Connect(function()
+						if input.UserInputState == Enum.UserInputState.End then
+							dragging = false
+						end
+					end)
+				end
+			end)
+			restoreButton.InputChanged:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+					restoreButton._dragInput = input
+				end
+			end)
+			UserInputService.InputChanged:Connect(function(input)
+				if restoreButton._dragInput == input and dragging then
+					local delta = input.Position - dragStart
+					restoreButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+				end
+			end)
+
+			restoreButton.MouseButton1Click:Connect(function()
+				-- restore UI
+				minimized = false
+				for _,v in pairs(container:GetChildren()) do
+					v.Visible = true
+				end
+				inputBox.Visible = true
+				local tween = TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(500, 160)})
+				tween:Play()
+				miniBtn.Text = "—"
+				if restoreButton then restoreButton:Destroy() end
+			end)
+		end
 	else
 		for _,v in pairs(container:GetChildren()) do
 			v.Visible = true
 		end
-		local tween = TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(420, 160)})
+		inputBox.Visible = true
+		dropdownFrame.Visible = false
+		methodsDropdown.Visible = false
+		local tween = TweenService:Create(container, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {Size = UDim2.fromOffset(500, 160)})
 		tween:Play()
 		miniBtn.Text = "—"
+		if restoreButton then restoreButton:Destroy() end
 	end
 end)
 
@@ -508,6 +1154,4 @@ local function setInitialPosition()
 end
 
 setInitialPosition()
-
--- Show initial popup from above
 showPopup("Simple Teleport Coordination By Kxk", Color3.fromRGB(100, 255, 100), true)
