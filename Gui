@@ -1,0 +1,248 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Helper functions
+local function new(class, props)
+    local obj = Instance.new(class)
+    for k, v in pairs(props or {}) do
+        obj[k] = v
+    end
+    return obj
+end
+local function rgb(r, g, b) return Color3.fromRGB(r, g, b) end
+
+-- Theme
+local THEME = {
+    Background = rgb(20, 20, 25),
+    Panel = rgb(30, 30, 35),
+    Soft = rgb(40, 40, 45),
+    Accent = rgb(100, 255, 100),
+    AccentSoft = rgb(80, 200, 80),
+    Text = rgb(240, 240, 245),
+    Dim = rgb(150, 150, 160)
+}
+
+-- Variables
+local toggleKey = Enum.KeyCode.RightControl -- default keybind
+local minimized = false
+local settingsOpen = false
+
+-- GUI root
+local screenGui = new("ScreenGui", {
+    Name = "StrongmanHub",
+    Parent = playerGui,
+    ResetOnSpawn = false
+})
+
+local root = new("Frame", {
+    Name = "Root",
+    Parent = screenGui,
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.new(0.5, 0, 0.5, 0),
+    Size = UDim2.new(0, 400, 0, 400),
+    BackgroundColor3 = THEME.Background
+})
+new("UICorner", {Parent = root, CornerRadius = UDim.new(0, 8)})
+
+-- Shadow
+new("ImageLabel", {
+    Parent = root,
+    Size = UDim2.new(1, 30, 1, 30),
+    Position = UDim2.new(0, -15, 0, -15),
+    BackgroundTransparency = 1,
+    Image = "rbxassetid://4958209488",
+    ImageColor3 = Color3.new(0, 0, 0),
+    ImageTransparency = 0.9,
+    ZIndex = -1
+})
+
+-- Header
+local header = new("Frame", {
+    Parent = root,
+    Size = UDim2.new(1, 0, 0, 50),
+    BackgroundColor3 = THEME.Panel
+})
+new("UICorner", {Parent = header, CornerRadius = UDim.new(0, 8)})
+
+new("TextLabel", {
+    Parent = header,
+    Position = UDim2.new(0, 15, 0, 0),
+    Size = UDim2.new(1, -120, 1, 0),
+    BackgroundTransparency = 1,
+    Text = "Strongman Hub",
+    Font = Enum.Font.SourceSansBold,
+    TextSize = 24,
+    TextColor3 = THEME.Text,
+    TextXAlignment = Enum.TextXAlignment.Left
+})
+
+-- Close Button (X)
+local closeBtn = new("TextButton", {
+    Parent = header,
+    Size = UDim2.new(0, 30, 0, 30),
+    Position = UDim2.new(1, -40, 0.5, -15),
+    BackgroundColor3 = THEME.Soft,
+    Text = "X",
+    Font = Enum.Font.SourceSansBold,
+    TextSize = 18,
+    TextColor3 = THEME.Text
+})
+new("UICorner", {Parent = closeBtn, CornerRadius = UDim.new(0, 6)})
+
+-- Minimize Button (-)
+local minimizeBtn = new("TextButton", {
+    Parent = header,
+    Size = UDim2.new(0, 30, 0, 30),
+    Position = UDim2.new(1, -80, 0.5, -15),
+    BackgroundColor3 = THEME.Soft,
+    Text = "-",
+    Font = Enum.Font.SourceSansBold,
+    TextSize = 18,
+    TextColor3 = THEME.Text
+})
+new("UICorner", {Parent = minimizeBtn, CornerRadius = UDim.new(0, 6)})
+
+-- Settings Button (<>)
+local settingsBtn = new("TextButton", {
+    Parent = header,
+    Size = UDim2.new(0, 30, 0, 30),
+    Position = UDim2.new(1, -120, 0.5, -15),
+    BackgroundColor3 = THEME.Soft,
+    Text = "<>",
+    Font = Enum.Font.SourceSansBold,
+    TextSize = 18,
+    TextColor3 = THEME.Text
+})
+new("UICorner", {Parent = settingsBtn, CornerRadius = UDim.new(0, 6)})
+
+-- Content Frame
+local content = new("Frame", {
+    Parent = root,
+    Name = "Content",
+    Position = UDim2.new(0, 0, 0, 50),
+    Size = UDim2.new(1, 0, 1, -50),
+    BackgroundTransparency = 1
+})
+
+-- Settings Panel (hidden by default)
+local settingsPanel = new("Frame", {
+    Parent = content,
+    Name = "SettingsPanel",
+    Size = UDim2.new(1, -20, 0, 150),
+    Position = UDim2.new(0, 10, 0, 10),
+    BackgroundColor3 = THEME.Panel,
+    Visible = false
+})
+new("UICorner", {Parent = settingsPanel, CornerRadius = UDim.new(0, 8)})
+
+-- Keybind Label
+local keybindLabel = new("TextLabel", {
+    Parent = settingsPanel,
+    Text = "KeyBind > " .. toggleKey.Name,
+    Size = UDim2.new(1, -20, 0, 40),
+    Position = UDim2.new(0, 10, 0, 10),
+    BackgroundTransparency = 1,
+    TextColor3 = THEME.Text,
+    Font = Enum.Font.SourceSans,
+    TextSize = 18,
+    TextXAlignment = Enum.TextXAlignment.Left
+})
+
+-- Detect key press for rebind
+local waitingForKey = false
+keybindLabel.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        keybindLabel.Text = "Press a key..."
+        waitingForKey = true
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if waitingForKey and input.UserInputType == Enum.UserInputType.Keyboard then
+        toggleKey = input.KeyCode
+        keybindLabel.Text = "KeyBind > " .. toggleKey.Name
+        waitingForKey = false
+    end
+end)
+
+-- Locked Footer Text
+local footerText = new("TextLabel", {
+    Parent = settingsPanel,
+    Text = "This Gui is made by Diablo",
+    Size = UDim2.new(1, -20, 0, 30),
+    Position = UDim2.new(0, 10, 1, -40),
+    BackgroundTransparency = 1,
+    TextColor3 = THEME.Dim,
+    Font = Enum.Font.SourceSansBold,
+    TextSize = 16,
+    TextXAlignment = Enum.TextXAlignment.Center
+})
+
+-- Lock footer from changes
+footerText.Changed:Connect(function()
+    footerText.Text = "This Gui is made by Diablo"
+end)
+
+-- Toggle Settings Panel
+settingsBtn.MouseButton1Click:Connect(function()
+    settingsOpen = not settingsOpen
+    settingsPanel.Visible = settingsOpen
+end)
+
+-- Minimize Logic
+minimizeBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    content.Visible = not minimized
+    settingsPanel.Visible = false
+end)
+
+-- Close GUI
+closeBtn.MouseButton1Click:Connect(function()
+    TweenService:Create(root, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {Size = UDim2.new(0, 0, 0, 0)}):Play()
+    task.wait(0.35)
+    screenGui:Destroy()
+end)
+
+-- Toggle visibility with keybind
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if not gpe and input.KeyCode == toggleKey then
+        root.Visible = not root.Visible
+    end
+end)
+
+-- Dragging the GUI
+local dragging = false
+local dragStart, startPos
+header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = root.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        root.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- Animate opening
+root.Size = UDim2.new(0, 0, 0, 0)
+TweenService:Create(root, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+    Size = UDim2.new(0, 400, 0, 400)
+}):Play()
+
+-- Notification
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "Strongman Hub",
+    Text = "GUI loaded. Press RightCtrl to toggle.",
+    Duration = 5
+})
